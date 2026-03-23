@@ -1,0 +1,51 @@
+name: Daily Notice Tracker
+
+on:
+  schedule:
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+jobs:
+  crawl:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 코드 체크아웃
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python 설치
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Chrome 설치
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
+
+      - name: 의존성 설치
+        run: pip install -r requirements.txt
+
+      - name: seen_posts.json 캐시 복원
+        uses: actions/cache@v4
+        with:
+          path: seen_posts.json
+          key: seen-posts-${{ github.run_id }}
+          restore-keys: |
+            seen-posts-
+
+      - name: 크롤러 실행
+        env:
+          KAKAO_TOKEN: ${{ secrets.KAKAO_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python crawler.py
+
+      - name: seen_posts.json 커밋 저장
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add seen_posts.json || true
+          git diff --staged --quiet || git commit -m "Update seen posts [$(date +'%Y-%m-%d')]"
+          git push || true
