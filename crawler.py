@@ -4,8 +4,6 @@ from bs4 import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 KAKAO_TOKEN = os.environ.get("KAKAO_TOKEN", "")
 SEEN_FILE = "seen_posts.json"
@@ -45,6 +43,28 @@ def get_driver():
     opts.add_argument("user-agent=Mozilla/5.0")
     return webdriver.Chrome(options=opts)
 
+def get_deadline_kspo(url):
+    try:
+        r = requests.get(url, headers={"User-Agent":"Mozilla/5.0"}, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        text = soup.get_text()
+        patterns = [
+            r"접수\s*기간[^\d]*(\d{4}[.\-]\d{2}[.\-]\d{2})[^\d]*~[^\d]*(\d{4}[.\-]\d{2}[.\-]\d{2})",
+            r"모집\s*기간[^\d]*(\d{4}[.\-]\d{2}[.\-]\d{2})[^\d]*~[^\d]*(\d{4}[.\-]\d{2}[.\-]\d{2})",
+            r"신청\s*기간[^\d]*(\d{4}[.\-]\d{2}[.\-]\d{2})[^\d]*~[^\d]*(\d{4}[.\-]\d{2}[.\-]\d{2})",
+            r"마감[^\d]*(\d{4}[.\-]\d{2}[.\-]\d{2})",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                if len(match.groups()) == 2:
+                    return f"{match.group(1)} ~ {match.group(2)}"
+                else:
+                    return match.group(1)
+    except:
+        pass
+    return ""
+
 def crawl_kusf():
     posts = []
     driver = get_driver()
@@ -64,7 +84,7 @@ def crawl_kusf():
                         date_text = t
                         break
                 if title and href and not href.startswith("javascript"):
-                    posts.append({"title": title, "url": href, "date": date_text, "source": "대학스포츠(KUSF)"})
+                    posts.append({"title": title, "url": href, "date": date_text, "deadline": "", "source": "대학스포츠(KUSF)"})
             except:
                 continue
     except Exception as e:
@@ -85,9 +105,8 @@ def crawl_kspo():
                 if not el: continue
                 title = el.get_text(strip=True)
                 href = el.get("href","")
-                # javascript 링크에서 ID 추출해서 실제 URL 만들기
+                onclick = el.get("onclick","") or ""
                 if "javascript" in href or not href:
-                    onclick = el.get("onclick","") or str(el)
                     match = re.search(r"fnBbsDetail\('(\d+)'", onclick)
                     if match:
                         seq = match.group(1)
@@ -96,7 +115,6 @@ def crawl_kspo():
                         href = url
                 elif not href.startswith("http"):
                     href = "https://spobiz.kspo.or.kr" + href
-                # 날짜 파싱
                 tds = row.select("td")
                 date_text = ""
                 for td in tds:
@@ -105,7 +123,8 @@ def crawl_kspo():
                         date_text = t
                         break
                 if title:
-                    posts.append({"title": title, "url": href, "date": date_text, "source": "스포츠산업지원(KSPO)"})
+                    deadline = get_deadline_kspo(href)
+                    posts.append({"title": title, "url": href, "date": date_text, "deadline": deadline, "source": "스포츠산업지원(KSPO)"})
             except:
                 continue
     except Exception as e:
@@ -125,13 +144,15 @@ def crawl_linkareer():
                 if not href or href in seen_hrefs: continue
                 seen_hrefs.add(href)
                 title = ""
+                deadline = ""
                 for el in card.find_elements(By.CSS_SELECTOR, "h3,h2,p,span"):
                     t = el.text.strip()
-                    if t and len(t) > 5:
+                    if t and len(t) > 5 and not title:
                         title = t
-                        break
+                    if "마감" in t or "~" in t:
+                        deadline = t
                 if title:
-                    posts.append({"title": title, "url": href, "date": "", "source": "링커리어"})
+                    posts.append({"title": title, "url": href, "date": "", "deadline": deadline, "source": "링커리어"})
             except:
                 continue
     except Exception as e:
@@ -140,10 +161,10 @@ def crawl_linkareer():
         driver.quit()
     return posts
 
-def send_kakao(message):
+def send_kakao(message, token):
     r = requests.post(
         "https://kapi.kakao.com/v2/api/talk/memo/default/send",
-        headers={"Authorization": f"Bearer {KAKAO_TOKEN}"},
+        headers={"Authorization": f"Bearer {token}"},
         data={"template_object": json.dumps({
             "object_type": "text",
             "text": message,
@@ -177,14 +198,27 @@ def main():
             msg += f"📌 {p['title']}\n"
             msg += f"🏢 {p['source']}\n"
             if p.get("date"):
-                msg += f"📅 {p['date']}\n"
-            msg += f"🔗 {p['url']}\n"
-            msg += "\n"
+                msg += f"📅 게시일: {p['date']}\n"
+            if p.get("deadline"):
+                msg += f"⏰ 모집기간: {p['deadline']}\n"
+            msg += f"🔗 {p['url']}\n\n"
         msg += f"{'─'*20}\n총 {len(new_posts)}건"
     else:
         msg = f"🏃 오늘의 스포츠/체육 공지\n{today}\n\n새로운 관련 공지가 없습니다 ✅"
 
-    send_kakao(msg)
+    # 나에게 보내기
+    tokens = [KAKAO_TOKEN]
+
+    # 추가 수신자 토큰 (환경변수로 관리)
+    extra = os.environ.get("KAKAO_TOKEN_2", "")
+    if extra: tokens.append(extra)
+    extra = os.environ.get("KAKAO_TOKEN_3", "")
+    if extra: tokens.append(extra)
+
+    for token in tokens:
+        if token:
+            send_kakao(msg, token)
+
     save_seen(seen)
     print("완료!")
 
