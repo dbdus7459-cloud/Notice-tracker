@@ -23,6 +23,45 @@ def is_relevant(title):
     if any(kw in title for kw in EXCLUDE_KEYWORDS): return False
     return any(kw in title for kw in INCLUDE_KEYWORDS)
 
+def parse_deadline(text):
+    """텍스트에서 마감일 추출 후 date 객체 반환"""
+    if not text: return None
+    patterns = [
+        r"~\s*(\d{4})[.\-](\d{2})[.\-](\d{2})",
+        r"(\d{4})[.\-](\d{2})[.\-](\d{2})\s*까지",
+        r"(\d{4})[.\-](\d{2})[.\-](\d{2})\s*마감",
+        r"(\d{2})[.\-](\d{2})\s*까지",
+    ]
+    today = datetime.now()
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            groups = match.groups()
+            try:
+                if len(groups) == 3:
+                    year, month, day = int(groups[0]), int(groups[1]), int(groups[2])
+                    if year < 100: year += 2000
+                    return datetime(year, month, day)
+                elif len(groups) == 2:
+                    month, day = int(groups[0]), int(groups[1])
+                    return datetime(today.year, month, day)
+            except:
+                continue
+    return None
+
+def is_expired(post):
+    """마감일이 오늘보다 이전이면 True"""
+    today = datetime.now().date()
+    # 제목에서 마감일 파싱
+    deadline_date = parse_deadline(post.get("title",""))
+    if not deadline_date:
+        deadline_date = parse_deadline(post.get("deadline",""))
+    if deadline_date:
+        if deadline_date.date() < today:
+            print(f"[마감됨] {post['title']} ({deadline_date.strftime('%Y.%m.%d')})")
+            return True
+    return False
+
 def load_seen():
     if os.path.exists(SEEN_FILE):
         with open(SEEN_FILE, "r", encoding="utf-8") as f: return json.load(f)
@@ -183,6 +222,10 @@ def main():
             for p in fn():
                 pid = make_id(p["title"], p["url"])
                 if pid not in seen:
+                    # 마감 여부 체크
+                    if is_expired(p):
+                        seen[pid] = {"title": p["title"], "date": str(datetime.now().date())}
+                        continue
                     if is_relevant(p["title"]):
                         new_posts.append(p)
                     seen[pid] = {"title": p["title"], "date": str(datetime.now().date())}
@@ -206,14 +249,11 @@ def main():
     else:
         msg = f"🏃 오늘의 스포츠/체육 공지\n{today}\n\n새로운 관련 공지가 없습니다 ✅"
 
-    # 나에게 보내기
     tokens = [KAKAO_TOKEN]
-
-    # 추가 수신자 토큰 (환경변수로 관리)
-    extra = os.environ.get("KAKAO_TOKEN_2", "")
-    if extra: tokens.append(extra)
-    extra = os.environ.get("KAKAO_TOKEN_3", "")
-    if extra: tokens.append(extra)
+    extra2 = os.environ.get("KAKAO_TOKEN_2", "")
+    if extra2: tokens.append(extra2)
+    extra3 = os.environ.get("KAKAO_TOKEN_3", "")
+    if extra3: tokens.append(extra3)
 
     for token in tokens:
         if token:
