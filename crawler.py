@@ -1,4 +1,4 @@
-import json, os, requests, hashlib, time
+import json, os, requests, hashlib, time, re
 from datetime import datetime
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -49,8 +49,7 @@ def crawl_kusf():
     posts = []
     driver = get_driver()
     try:
-        url = "https://www.kusf.or.kr/news/news.html?board=notice"
-        driver.get(url)
+        driver.get("https://www.kusf.or.kr/news/news.html?board=notice")
         time.sleep(3)
         for row in driver.find_elements(By.CSS_SELECTOR, "table tbody tr")[:30]:
             try:
@@ -58,9 +57,14 @@ def crawl_kusf():
                 cols = row.find_elements(By.TAG_NAME, "td")
                 title = el.text.strip()
                 href = el.get_attribute("href") or ""
-                date = cols[-1].text.strip() if cols else ""
-                if title:
-                    posts.append({"title": title, "url": href, "date": date, "source": "대학스포츠(KUSF)"})
+                date_text = ""
+                for col in cols:
+                    t = col.text.strip()
+                    if re.match(r"\d{4}-\d{2}-\d{2}", t):
+                        date_text = t
+                        break
+                if title and href and not href.startswith("javascript"):
+                    posts.append({"title": title, "url": href, "date": date_text, "source": "대학스포츠(KUSF)"})
             except:
                 continue
     except Exception as e:
@@ -79,14 +83,29 @@ def crawl_kspo():
             try:
                 el = row.select_one("td.subject a") or row.select_one("td a")
                 if not el: continue
-                href = el.get("href","")
-                if href and not href.startswith("http"):
-                    href = "https://spobiz.kspo.or.kr" + href
-                tds = row.select("td")
                 title = el.get_text(strip=True)
-                date = tds[-1].get_text(strip=True) if tds else ""
+                href = el.get("href","")
+                # javascript 링크에서 ID 추출해서 실제 URL 만들기
+                if "javascript" in href or not href:
+                    onclick = el.get("onclick","") or str(el)
+                    match = re.search(r"fnBbsDetail\('(\d+)'", onclick)
+                    if match:
+                        seq = match.group(1)
+                        href = f"https://spobiz.kspo.or.kr/front/bbs/bbsDetail.do?boardId=BBS0001&topMenuSeq=2&bbsSeq={seq}"
+                    else:
+                        href = url
+                elif not href.startswith("http"):
+                    href = "https://spobiz.kspo.or.kr" + href
+                # 날짜 파싱
+                tds = row.select("td")
+                date_text = ""
+                for td in tds:
+                    t = td.get_text(strip=True)
+                    if re.match(r"\d{4}\.\d{2}\.\d{2}", t) or re.match(r"\d{4}-\d{2}-\d{2}", t):
+                        date_text = t
+                        break
                 if title:
-                    posts.append({"title": title, "url": href, "date": date, "source": "스포츠산업지원(KSPO)"})
+                    posts.append({"title": title, "url": href, "date": date_text, "source": "스포츠산업지원(KSPO)"})
             except:
                 continue
     except Exception as e:
@@ -97,12 +116,10 @@ def crawl_linkareer():
     posts = []
     driver = get_driver()
     try:
-        url = "https://linkareer.com/list/activity?filterType=INTEREST&orderBy_direction=DESC&orderBy_field=CREATED_AT&page=1"
-        driver.get(url)
+        driver.get("https://linkareer.com/list/activity?filterType=INTEREST&orderBy_direction=DESC&orderBy_field=CREATED_AT&page=1")
         time.sleep(5)
         seen_hrefs = set()
-        cards = driver.find_elements(By.CSS_SELECTOR, "a[href*='/activity/']")
-        for card in cards[:40]:
+        for card in driver.find_elements(By.CSS_SELECTOR, "a[href*='/activity/']")[:40]:
             try:
                 href = card.get_attribute("href") or ""
                 if not href or href in seen_hrefs: continue
@@ -155,15 +172,17 @@ def main():
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
     if new_posts:
-        msg = f"오늘의 스포츠/체육 공지 ({today})\n\n"
+        msg = f"🏃 오늘의 스포츠/체육 공지\n{today}\n{'─'*20}\n\n"
         for p in new_posts:
-            msg += f"[{p['source']}]\n"
-            msg += f"{p['title']}\n"
-            if p.get("date"): msg += f"날짜: {p['date']}\n"
-            msg += f"{p['url']}\n\n"
-        msg += f"총 {len(new_posts)}건"
+            msg += f"📌 {p['title']}\n"
+            msg += f"🏢 {p['source']}\n"
+            if p.get("date"):
+                msg += f"📅 {p['date']}\n"
+            msg += f"🔗 {p['url']}\n"
+            msg += "\n"
+        msg += f"{'─'*20}\n총 {len(new_posts)}건"
     else:
-        msg = f"오늘의 스포츠/체육 공지 ({today})\n\n새로운 관련 공지가 없습니다."
+        msg = f"🏃 오늘의 스포츠/체육 공지\n{today}\n\n새로운 관련 공지가 없습니다 ✅"
 
     send_kakao(msg)
     save_seen(seen)
