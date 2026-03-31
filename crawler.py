@@ -24,7 +24,6 @@ def is_relevant(title):
     return any(kw in title for kw in INCLUDE_KEYWORDS)
 
 def parse_deadline(text):
-    """텍스트에서 마감일 추출 후 date 객체 반환"""
     if not text: return None
     patterns = [
         r"~\s*(\d{4})[.\-](\d{2})[.\-](\d{2})",
@@ -50,15 +49,13 @@ def parse_deadline(text):
     return None
 
 def is_expired(post):
-    """마감일이 오늘보다 이전이면 True"""
     today = datetime.now().date()
-    # 제목에서 마감일 파싱
     deadline_date = parse_deadline(post.get("title",""))
     if not deadline_date:
         deadline_date = parse_deadline(post.get("deadline",""))
     if deadline_date:
         if deadline_date.date() < today:
-            print(f"[마감됨] {post['title']} ({deadline_date.strftime('%Y.%m.%d')})")
+            print(f"[마감됨] {post['title']}")
             return True
     return False
 
@@ -200,6 +197,16 @@ def crawl_linkareer():
         driver.quit()
     return posts
 
+def format_post(p):
+    text = f"📌 {p['title']}\n"
+    text += f"🏢 {p['source']}\n"
+    if p.get("date"):
+        text += f"📅 게시일: {p['date']}\n"
+    if p.get("deadline"):
+        text += f"⏰ 모집기간: {p['deadline']}\n"
+    text += f"🔗 {p['url']}\n"
+    return text
+
 def send_kakao(message, token):
     r = requests.post(
         "https://kapi.kakao.com/v2/api/talk/memo/default/send",
@@ -217,37 +224,48 @@ def main():
     print(f"[{datetime.now()}] 시작")
     seen = load_seen()
     new_posts = []
+    existing_posts = []
+
     for fn in [crawl_kusf, crawl_kspo, crawl_linkareer]:
         try:
             for p in fn():
+                if is_expired(p):
+                    pid = make_id(p["title"], p["url"])
+                    seen[pid] = {"title": p["title"], "date": str(datetime.now().date())}
+                    continue
+                if not is_relevant(p["title"]):
+                    continue
                 pid = make_id(p["title"], p["url"])
                 if pid not in seen:
-                    # 마감 여부 체크
-                    if is_expired(p):
-                        seen[pid] = {"title": p["title"], "date": str(datetime.now().date())}
-                        continue
-                    if is_relevant(p["title"]):
-                        new_posts.append(p)
+                    new_posts.append(p)
                     seen[pid] = {"title": p["title"], "date": str(datetime.now().date())}
+                else:
+                    existing_posts.append(p)
         except Exception as e:
             print(f"[오류] {fn.__name__}: {e}")
 
-    print(f"새 공지 {len(new_posts)}개")
+    print(f"새 공지 {len(new_posts)}개 / 진행중 {len(existing_posts)}개")
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
+    msg = f"🏃 스포츠/체육 공지 알림\n{today}\n{'═'*22}\n\n"
+
+    # 새로운 공지 섹션
+    msg += f"🆕 새로운 공지 ({len(new_posts)}건)\n{'─'*22}\n"
     if new_posts:
-        msg = f"🏃 오늘의 스포츠/체육 공지\n{today}\n{'─'*20}\n\n"
         for p in new_posts:
-            msg += f"📌 {p['title']}\n"
-            msg += f"🏢 {p['source']}\n"
-            if p.get("date"):
-                msg += f"📅 게시일: {p['date']}\n"
-            if p.get("deadline"):
-                msg += f"⏰ 모집기간: {p['deadline']}\n"
-            msg += f"🔗 {p['url']}\n\n"
-        msg += f"{'─'*20}\n총 {len(new_posts)}건"
+            msg += format_post(p) + "\n"
     else:
-        msg = f"🏃 오늘의 스포츠/체육 공지\n{today}\n\n새로운 관련 공지가 없습니다 ✅"
+        msg += "오늘 새로운 공지가 없습니다\n\n"
+
+    # 진행중인 공지 섹션
+    msg += f"\n📋 진행중인 공지 ({len(existing_posts)}건)\n{'─'*22}\n"
+    if existing_posts:
+        for p in existing_posts[:10]:  # 최대 10개
+            msg += format_post(p) + "\n"
+    else:
+        msg += "진행중인 공지가 없습니다\n"
+
+    msg += f"\n{'═'*22}"
 
     tokens = [KAKAO_TOKEN]
     extra2 = os.environ.get("KAKAO_TOKEN_2", "")
