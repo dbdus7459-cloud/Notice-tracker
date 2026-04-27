@@ -248,8 +248,6 @@ def main():
     today = datetime.now().strftime("%Y년 %m월 %d일")
 
     msg = f"🏃 스포츠/체육 공지 알림\n{today}\n{'═'*22}\n\n"
-
-    # 새로운 공지 섹션
     msg += f"🆕 새로운 공지 ({len(new_posts)}건)\n{'─'*22}\n"
     if new_posts:
         for p in new_posts:
@@ -257,10 +255,9 @@ def main():
     else:
         msg += "오늘 새로운 공지가 없습니다\n\n"
 
-    # 진행중인 공지 섹션
     msg += f"\n📋 진행중인 공지 ({len(existing_posts)}건)\n{'─'*22}\n"
     if existing_posts:
-        for p in existing_posts[:10]:  # 최대 10개
+        for p in existing_posts[:10]:
             msg += format_post(p) + "\n"
     else:
         msg += "진행중인 공지가 없습니다\n"

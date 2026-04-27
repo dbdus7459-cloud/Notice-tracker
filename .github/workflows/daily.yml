@@ -29,7 +29,8 @@ jobs:
       - name: 크롤러 실행
         env:
           KAKAO_TOKEN: ${{ secrets.KAKAO_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          KAKAO_TOKEN_2: ${{ secrets.KAKAO_TOKEN_2 }}
+          KAKAO_TOKEN_3: ${{ secrets.KAKAO_TOKEN_3 }}
         run: python crawler.py
       - name: 결과 커밋
         run: |
