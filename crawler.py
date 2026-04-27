@@ -257,7 +257,7 @@ def main():
 
     msg += f"\n📋 진행중인 공지 ({len(existing_posts)}건)\n{'─'*22}\n"
     if existing_posts:
-        for p in existing_posts[:10]:
+        for p in existing_posts:
             msg += format_post(p) + "\n"
     else:
         msg += "진행중인 공지가 없습니다\n"
